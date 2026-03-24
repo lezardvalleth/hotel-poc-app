@@ -1,0 +1,43 @@
+{
+  "name": "SETI — hotel-poc-app Dev Environment",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:20",
+  "features": {
+    "ghcr.io/itsmechlark/features/postgresql:1": {}
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode",
+        "eamodio.gitlens",
+        "EditorConfig.EditorConfig",
+        "christian-kohler.npm-intellisense",
+        "eg2.vscode-npm-script",
+        "mtxr.sqltools",
+        "mtxr.sqltools-driver-pg",
+        "Prisma.prisma"
+      ],
+      "settings": {
+        "editor.formatOnSave": true,
+        "editor.defaultFormatter": "esbenp.prettier-vscode",
+        "terminal.integrated.defaultProfile.linux": "bash"
+      }
+    }
+  },
+  "postCreateCommand": "npm install && echo \"DATABASE_URL=postgresql://postgres:postgres@localhost:5432/hoteldb\" >> .env && npx prisma generate",
+  "remoteUser": "node",
+  "forwardPorts": [
+    3000,
+    5432
+  ],
+  "portsAttributes": {
+    "3000": {
+      "label": "App",
+      "onAutoForward": "notify"
+    },
+    "5432": {
+      "label": "PostgreSQL",
+      "onAutoForward": "silent"
+    }
+  }
+}
