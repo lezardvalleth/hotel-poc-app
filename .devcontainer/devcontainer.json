@@ -24,20 +24,12 @@
       }
     }
   },
-  "postCreateCommand": "npm install && echo \"DATABASE_URL=postgresql://postgres:postgres@localhost:5432/hoteldb\" >> .env && npx prisma generate",
+  "postCreateCommand": "bash .devcontainer/setup.sh 2>&1 | tee /tmp/seti-setup.log",
+  "waitFor": "postCreateCommand",
   "remoteUser": "node",
-  "forwardPorts": [
-    3000,
-    5432
-  ],
+  "forwardPorts": [3000, 5432],
   "portsAttributes": {
-    "3000": {
-      "label": "App",
-      "onAutoForward": "notify"
-    },
-    "5432": {
-      "label": "PostgreSQL",
-      "onAutoForward": "silent"
-    }
+    "3000": {"label": "App", "onAutoForward": "notify"},
+    "5432": {"label": "PostgreSQL", "onAutoForward": "silent"}
   }
 }
