@@ -16,14 +16,45 @@ echo -e "${CYAN}║     SETI Security Guard — Aplicando políticas     ║${NC
 echo -e "${CYAN}╚══════════════════════════════════════════════════╝${NC}"
 echo ""
 
-# ── Parser de INI ─────────────────────────────────────────────────────────────
+# ── Parser INI manual ─────────────────────────────────────────────────────────
 parse_ini_section() {
   local file="$1"
   local section="$2"
-  awk -v sec="$section" '
-    /^\[/ { in_section = ($0 == "["sec"]") }
-    in_section && /^[^#\[]/ && NF { print $0 }
-  ' "$file"
+  python3 - << EOF
+section = None
+items = []
+with open('$file') as f:
+    for line in f:
+        line = line.strip()
+        if not line or line.startswith('#'):
+            continue
+        if line.startswith('[') and line.endswith(']'):
+            section = line[1:-1].strip()
+            continue
+        if section == '$section' and '=' not in line:
+            items.append(line)
+print(' '.join(items))
+EOF
+}
+
+parse_ini_value() {
+  local file="$1"
+  local section="$2"
+  local key="$3"
+  python3 - << EOF
+section = None
+with open('$file') as f:
+    for line in f:
+        line = line.strip()
+        if not line or line.startswith('#'):
+            continue
+        if line.startswith('[') and line.endswith(']'):
+            section = line[1:-1].strip()
+            continue
+        if section == '$section' and line.startswith('$key='):
+            print(line.split('=',1)[1])
+            break
+EOF
 }
 
 # ── Descargar política desde repo privado ─────────────────────────────────────
@@ -46,23 +77,20 @@ fi
 
 chmod 400 "$POLICY_FILE"
 
-# Leer metadata
-CLIENTE=$(parse_ini_section "$POLICY_FILE" "cliente" | grep "^nombre=" | cut -d= -f2)
-VERSION=$(parse_ini_section "$POLICY_FILE" "cliente" | grep "^version=" | cut -d= -f2)
-CONTACTO=$(parse_ini_section "$POLICY_FILE" "cliente" | grep "^contacto=" | cut -d= -f2)
+CLIENTE=$(parse_ini_value "$POLICY_FILE" "cliente" "nombre")
+VERSION=$(parse_ini_value "$POLICY_FILE" "cliente" "version")
+CONTACTO=$(parse_ini_value "$POLICY_FILE" "cliente" "contacto")
 
 echo -e "    ${GREEN}✅ Política descargada — Cliente: $CLIENTE v$VERSION${NC}"
 
-# ── Leer blacklists ───────────────────────────────────────────────────────────
-NPM_BLACKLIST=$(parse_ini_section "$POLICY_FILE" "npm" | grep -v "^nombre\|^version\|^contacto" | tr '\n' ' ')
-PIP_BLACKLIST=$(parse_ini_section "$POLICY_FILE" "pip" | tr '\n' ' ')
-URL_BLACKLIST=$(parse_ini_section "$POLICY_FILE" "urls" | tr '\n' ' ')
-EXT_BLACKLIST=$(parse_ini_section "$POLICY_FILE" "archivos" | tr '\n' ' ')
+NPM_BLACKLIST=$(parse_ini_section "$POLICY_FILE" "npm")
+PIP_BLACKLIST=$(parse_ini_section "$POLICY_FILE" "pip")
+URL_BLACKLIST=$(parse_ini_section "$POLICY_FILE" "urls")
+EXT_BLACKLIST=$(parse_ini_section "$POLICY_FILE" "archivos")
 
 # ── Instalar interceptores en .bashrc ─────────────────────────────────────────
 echo -e "🛡️  [2/4] Instalando interceptores de comandos..."
 
-# Limpiar instalación previa
 sed -i '/# ── SETI Security Guard/,/# ── fin SETI Security Guard/d' "$BASHRC"
 
 cat >> "$BASHRC" << ALIASES
@@ -156,43 +184,54 @@ ALIASES
 
 echo -e "    ${GREEN}✅ Interceptores instalados (npm, pip, curl, wget)${NC}"
 
-# ── Git pre-commit hook ───────────────────────────────────────────────────────
+# ── Git pre-commit hook con parser Python ─────────────────────────────────────
 echo -e "🔒 [3/4] Instalando git hook pre-commit..."
 
 mkdir -p /workspaces/hotel-poc-app/.git/hooks
-cat > /workspaces/hotel-poc-app/.git/hooks/pre-commit << HOOK
+cat > /workspaces/hotel-poc-app/.git/hooks/pre-commit << 'HOOK'
 #!/bin/bash
-POLICY_FILE="$POLICY_FILE"
-LOG_FILE="$LOG_FILE"
+POLICY_FILE="/tmp/seti-security-policy.ini"
+LOG_FILE="/tmp/seti-security.log"
 BLOCKED=false
 
-parse_ini_section() {
-  local file="\$1"
-  local section="\$2"
-  awk -v sec="\$section" '
-    /^\[/ { in_section = (\$0 == "["\$sec"]") }
-    in_section && /^[^#\[]/ && NF { print \$0 }
-  ' "\$file"
-}
+if [ ! -f "$POLICY_FILE" ]; then
+  echo "⚠️  SETI: archivo de política no encontrado — commit permitido"
+  exit 0
+fi
 
-EXT_BLACKLIST=\$(parse_ini_section "\$POLICY_FILE" "archivos" | tr '\n' ' ')
+EXT_BLACKLIST=$(python3 - << 'EOF'
+section = None
+exts = []
+with open('/tmp/seti-security-policy.ini') as f:
+    for line in f:
+        line = line.strip()
+        if not line or line.startswith('#'):
+            continue
+        if line.startswith('[') and line.endswith(']'):
+            section = line[1:-1].strip()
+            continue
+        if section == 'archivos' and '=' not in line:
+            exts.append(line)
+print(' '.join(exts))
+EOF
+)
 
-for file in \$(git diff --cached --name-only); do
-  for ext in \$EXT_BLACKLIST; do
-    if [[ "\$file" == *"\$ext" ]]; then
+for file in $(git diff --cached --name-only); do
+  for ext in $EXT_BLACKLIST; do
+    if [[ "$file" == *"$ext" ]]; then
       echo ""
       echo "🚫 SETI SECURITY GUARD — ARCHIVO BLOQUEADO EN COMMIT"
-      echo "   Archivo  : \$file"
-      echo "   Extensión: \$ext"
-      echo "   Contacto : $CONTACTO"
+      echo "   Archivo  : $file"
+      echo "   Extensión: $ext"
+      echo "   Contacto : seguridad@seti.com.co"
       echo ""
-      echo "[\$(date '+%Y-%m-%d %H:%M:%S')] BLOCKED commit \$file (\$ext)" >> "\$LOG_FILE"
+      echo "[$(date '+%Y-%m-%d %H:%M:%S')] BLOCKED commit $file ($ext)" >> "$LOG_FILE"
       BLOCKED=true
     fi
   done
 done
 
-if [ "\$BLOCKED" = true ]; then
+if [ "$BLOCKED" = true ]; then
   echo "❌ Commit bloqueado por política de seguridad SETI."
   exit 1
 fi
